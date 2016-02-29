@@ -5,12 +5,15 @@ import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.content.res.AssetManager;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Point;
 import android.media.AudioManager;
 import android.media.SoundPool;
 import android.os.Bundle;
 import android.view.Display;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
@@ -65,21 +68,6 @@ public class MainActivity extends Activity {
         squashCourtView = new SquashCourtView(this);
         setContentView(squashCourtView);
 
-        //Set up sound
-        soundPool = new SoundPool(10, AudioManager.STREAM_MUSIC, 0);
-        try{
-            AssetManager assetManager = getAssets();
-            AssetFileDescriptor descriptor;
-            descriptor = assetManager.openFd("Sample1.ogg");
-            sample1 = soundPool.load(descriptor, 0);
-            descriptor = assetManager.openFd("Sample2.ogg");
-            sample2 = soundPool.load(descriptor, 0);
-            descriptor = assetManager.openFd("Sample3.ogg");
-            sample3 = soundPool.load(descriptor, 0);
-            descriptor = assetManager.openFd("Sample4.ogg");
-            sample4 = soundPool.load(descriptor, 0);
-        } catch(Exception e){}
-
         //Set up variables
         display = getWindowManager().getDefaultDisplay();
         size = new Point();
@@ -102,6 +90,37 @@ public class MainActivity extends Activity {
 
     }
 
+    @Override
+    protected void onStop(){
+        super.onStop();
+        while(true){
+            squashCourtView.pause();
+            break;
+        }
+        finish();
+    }
+
+    @Override
+    protected void onPause(){
+        super.onPause();
+        squashCourtView.pause();
+    }
+
+    @Override
+    protected void onResume(){
+        super.onResume();
+        squashCourtView.resume();
+    }
+
+    public boolean onKeyDown(int keyCode, KeyEvent event){
+        if (keyCode == KeyEvent.KEYCODE_BACK){
+            squashCourtView.pause();
+            finish();
+            return true;
+        }
+        return false;
+
+    }
     class SquashCourtView extends SurfaceView implements Runnable {
         Thread ourThread = null;
         SurfaceHolder ourHolder;
@@ -142,6 +161,66 @@ public class MainActivity extends Activity {
             }
         }
 
+        public void controlFPS(){
+            long timeThisFrame = (System.currentTimeMillis() - lastFrameTime);
+            long timeToSleep = 15 - timeThisFrame;
+            if(timeThisFrame > 0){
+                fps = (int)(1000/timeThisFrame);
+            }
+            if (timeToSleep > 0){
+                try {
+                    ourThread.sleep(timeToSleep);
+                } catch(InterruptedException e){}
+            }
+        }
+
+        public void pause(){
+            playingSquash = false;
+            try{
+                ourThread.join();
+            } catch (InterruptedException e){}
+        }
+
+        public void resume() {
+            playingSquash = true;
+            ourThread = new Thread(this);
+            ourThread.start();
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent motionEvent){
+            switch(motionEvent.getAction() & MotionEvent.ACTION_MASK){
+                case MotionEvent.ACTION_DOWN:
+                    if (motionEvent.getX() >= screenWidth / 2){
+                        racketIsMovingRight = true;
+                        racketIsMovingLeft = false;
+                    } else{
+                        racketIsMovingRight = false;
+                        racketIsMovingLeft = true;
+                    }
+                    break;
+                case MotionEvent.ACTION_UP:
+                    racketIsMovingLeft = false;
+                    racketIsMovingRight = false;
+                    break;
+            }
+            return true;
+        }
+
+        public void drawCourt(){
+            if (ourHolder.getSurface().isValid()){
+                canvas = ourHolder.lockCanvas();
+                canvas.drawColor(Color.BLACK);
+                paint.setColor(Color.argb(255, 255, 255, 255));
+                paint.setTextSize(45);
+                canvas.drawText("Score: " + score + " Lives: " + lives + " FPS: " + fps, 20, 40, paint);
+                canvas.drawRect(racketPosition.x - (racketWidth / 2), racketPosition.y - (racketHeight / 2),
+                        racketPosition.x + (racketWidth / 2), racketPosition.y + racketHeight, paint);
+                canvas.drawRect(ballPosition.x, ballPosition.y, ballPosition.x + ballWidth, ballPosition.y + ballWidth, paint);
+                ourHolder.unlockCanvasAndPost(canvas);
+            }
+        }
+
         public void updateCourt(){
             if (racketIsMovingRight) {
                 racketPosition.x = racketPosition.x + 10;
@@ -154,13 +233,11 @@ public class MainActivity extends Activity {
             if(ballPosition.x + ballWidth > screenWidth){
                 ballIsMovingLeft = true;
                 ballIsMovingRight = false;
-                soundPool.play(sample1, 1, 1, 0, 0, 1);
             }
 
             if(ballPosition.x < 0){
                 ballIsMovingLeft = false;
                 ballIsMovingRight = true;
-                soundPool.play(sample1, 1, 1, 0, 0, 1);
             }
 
             if(ballPosition.y > screenHeight - ballWidth ){
@@ -168,7 +245,6 @@ public class MainActivity extends Activity {
                 if (lives == 0) {
                     lives = 3;
                     score = 0;
-                    soundPool.play(sample4, 1, 1, 0, 0, 1);
                 }
                 ballPosition.y = 1 + ballWidth;
                 Random randomNumber = new Random();
@@ -193,11 +269,10 @@ public class MainActivity extends Activity {
                 }
             }
 
-            if(ballPosition.y < = 0){
+            if(ballPosition.y <= 0){
                 ballIsMovingDown = true;
                 ballIsMovingUp = false;
                 ballPosition.y = 1;
-                soundPool.play(sample2, 1, 1, 0, 0, 1);
             }
 
             if (ballIsMovingUp) {
@@ -214,6 +289,24 @@ public class MainActivity extends Activity {
 
             if (ballIsMovingRight) {
                 ballPosition.x += 12;
+            }
+
+            if (ballPosition.y + ballWidth >= (racketPosition.y - racketHeight / 2 )){
+                int halfRacket = racketWidth/2;
+                if (ballPosition.x + ballWidth > (racketPosition.x - halfRacket)
+                        && ballPosition.x - ballWidth < (racketPosition.x + halfRacket)){
+                    score++;
+                    ballIsMovingUp = true;
+                    ballIsMovingDown = false;
+
+                    if (ballPosition.x > racketPosition.x) {
+                        ballIsMovingRight = true;
+                        ballIsMovingLeft = false;
+                    } else {
+                        ballIsMovingRight = false;
+                        ballIsMovingLeft = true;
+                    }
+                }
             }
         }
     }
